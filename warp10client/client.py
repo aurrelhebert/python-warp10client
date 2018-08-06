@@ -51,6 +51,7 @@ class Warp10Client(object):
         'fetch': 200,
         'ingress': 200,
         'delete': 200,
+        'warpscript': 200,
     }
 
     def check_resp_status():
@@ -85,32 +86,59 @@ class Warp10Client(object):
     def _get_token(self, call_type='fetch'):
         if call_type in ('delete', 'ingress'):
             return self._write_token
+        elif call_type == 'warpscript':
+            return None
         else:
             return self._read_token
 
     def _get_headers(self, call_type='fetch'):
         headers = dict()
-        headers[constants.WARP_TOKEN_HEADER_NAME] = \
-            self._get_token(call_type=call_type)
-        if call_type == 'ingress':
+
+        token = self._get_token(call_type=call_type)
+        if token:
+            headers[constants.WARP_TOKEN_HEADER_NAME] = token
+        if call_type in ('ingress', 'warpscript'):
             headers['Content-Type'] = 'text/plain'
         return headers
 
     @staticmethod
     def _get_method(call_type='fetch'):
-        if call_type in ('fetch', 'ingress'):
+        if call_type in ('fetch', 'ingress', 'warpscript'):
             return 'POST'
         else:
             return 'GET'
 
-    def _get_url(self, call_type='fetch'):
+    def _get_delete_query(self, metric):
+        tags = ','.join([
+            '{}={}'.format(*item)
+            for item in metric.get('tags', {}).items()
+        ])
+
+        params = [
+            "deleteall",
+            "selector={}{{{}}}".format(metric['name'], tags),
+        ] + [
+            '='.join(*item)
+            for item in metric.get('timestamp', {})
+        ]
+        return "?{}".format('&'.join(params))
+
+
+    def _get_url(self, call_type='fetch', **kwargs):
+        query = str()
+
         if call_type == 'fetch':
             api_endpoint = 'exec'
+        elif call_type == 'warpscript':
+            api_endpoint = 'exec/warpscript'
         elif call_type == 'ingress':
             api_endpoint = 'update'
         else:
             api_endpoint = 'delete'
-        return "%s/%s" % (self._warp10_api_url, api_endpoint)
+            query = self._get_delete_query(**kwargs)
+
+        return "{}/{}{}".format(self._warp10_api_url,
+                                api_endpoint, query)
 
     @staticmethod
     def _get_aggregation_method(method):
@@ -160,7 +188,7 @@ class Warp10Client(object):
         :return timeserie: timeserie object
 
         """
-        resp = self._call(metric, call_type='fetch')
+        resp = self._call(metric=metric, call_type='fetch')
         metric_list = list()
         if eval(resp.content)[0]:
             values = eval(resp.content)[0][0].get('v')
@@ -188,11 +216,11 @@ class Warp10Client(object):
 
         :param metrics: Hash with metric or list of metrics Hashes
         :return added_metrics: list of metric objects
-
+n
         """
         metrics = [metrics] if type(metrics) == dict else metrics
         added_metrics = list()
-        self._call(metrics, call_type='ingress')
+        self._call(metrics=metrics, call_type='ingress')
         for metric in metrics:
             added_metrics.append(
                 Metric(name=metric.get('name'),
@@ -201,16 +229,30 @@ class Warp10Client(object):
                        position=Position(**metric.get('position'))))
         return added_metrics
 
-    def delete(self, metrics):
+    def delete(self, metric):
         """
 
         Delete metrics from WARP10 backend.
 
-        :param metrics: Hash with metric or list of metrics Hashes
-        :return bolean
+        :param metric: metric description
+        :return int: number of deleted metrics
 
         """
-        raise NotImplementedError
+
+        res = self._call(metric=metric, call_type='delete')
+        return len(res.text.splitlines())
+
+    def exec(self, script):
+        """
+
+        Execute WarpScript
+
+        :param script: WarpScript
+        :return result
+        """
+
+        res = self._call(script=script, call_type='warpscript')
+        return res.text
 
     @staticmethod
     def _remove_sensitive_data(data):
@@ -222,13 +264,12 @@ class Warp10Client(object):
         return data
 
     @check_resp_status()
-    def _call(self, metrics, call_type='fetch'):
-        url = self._get_url(call_type=call_type)
+    def _call(self, call_type='fetch', **kwargs):
+        url = self._get_url(call_type=call_type, **kwargs)
         headers = self._get_headers(call_type=call_type)
 
         try:
-            data = self._gen_request_body(metrics=metrics,
-                                          call_type=call_type)
+            data = self._gen_request_body(call_type=call_type, **kwargs)
         except Exception as e:
             raise CallException('Failed to prepare request.\n'
                                 'Error: %s\n'
@@ -265,13 +306,15 @@ class Warp10Client(object):
                                     self._remove_sensitive_data(
                                         deepcopy(data))))
 
-    def _gen_request_body(self, metrics, call_type='fetch'):
+    def _gen_request_body(self, call_type='fetch', **kwargs):
         if call_type == 'fetch':
-            return self._gen_warp10_script(metrics)
+            return self._gen_fetch_script(**kwargs)
         elif call_type == 'ingress':
-            return self._get_write_body(metrics)
+            return self._get_write_body(**kwargs)
+        elif call_type == 'warpscript':
+            return kwargs['script']
         else:
-            return self._get_delete_body(metrics)
+            return self._get_delete_body(**kwargs)
 
     def _gen_warp10_script_timebound(self, metric):
         t_h = metric.get('timestamp', None)
@@ -318,7 +361,7 @@ class Warp10Client(object):
         return w_s
 
     def _get_warp10_script_tags(self, metric):
-        w_s = str()
+        w_s = "{}"
         if metric.get('tags', None):
             tags = metric.get('tags')
             # Cook string like "{ 'key1' 'value' 'key2' 'value2' ...}"
@@ -327,7 +370,7 @@ class Warp10Client(object):
                 six.iteritems(tags) if t_v))
         return w_s
 
-    def _gen_warp10_script(self, metric):
+    def _gen_fetch_script(self, metric):
         return "[ '{}' '{}' {} {} ] FETCH {} ".format(
             self._get_token(),
             metric.get('name'),
@@ -345,7 +388,7 @@ class Warp10Client(object):
             data += '{}\n'.format(metric.format_metric())
         return data
 
-    def _get_delete_body(self, metrics):
+    def _get_delete_body(self, **kargs):
         return str()
 
     def _convert_metrics(self, metrics):
