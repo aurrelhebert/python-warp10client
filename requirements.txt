@@ -1,5 +1,3 @@
-pbr>=1.8 # Apache-2.0
-
 six
 daiquiri
 requests>=2.2.1

@@ -1,13 +1,22 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-import setuptools
+from setuptools import setup
 
 try:
     import multiprocessing  # noqa
 except ImportError:
     pass
 
-setuptools.setup(
-    setup_requires=['pbr>=1.8'],
-    pbr=True)
+setup(
+    name='warp10client',
+    version='1.0.1',
+    description="OVH Python Warp10 Client",
+    author="OVH",
+    description_file="README.md",
+
+    packages=[
+        'warp10client',
+        'warp10client/common',
+    ]
+)
