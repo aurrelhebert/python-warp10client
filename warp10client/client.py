@@ -229,6 +229,9 @@ class Warp10Client(object):
         try:
             data = self._gen_request_body(metrics=metrics,
                                           call_type=call_type)
+
+            data = data.replace("+", "%20")
+
         except Exception as e:
             raise CallException('Failed to prepare request.\n'
                                 'Error: %s\n'
@@ -323,8 +326,8 @@ class Warp10Client(object):
             tags = metric.get('tags')
             # Cook string like "{ 'key1' 'value' 'key2' 'value2' ...}"
             w_s = '{{ {} }}'.format(' '.join("'%s' '%s'" %
-                                    (t_k, t_v) for t_k, t_v in
-                six.iteritems(tags) if t_v))
+                                             (t_k, t_v) for t_k, t_v in
+                                             six.iteritems(tags) if t_v))
         return w_s
 
     def _gen_warp10_script(self, metric):
