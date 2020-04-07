@@ -123,7 +123,6 @@ class Warp10Client(object):
         ]
         return "?{}".format('&'.join(params))
 
-
     def _get_url(self, call_type='fetch', **kwargs):
         query = str()
 
@@ -270,6 +269,7 @@ n
 
         try:
             data = self._gen_request_body(call_type=call_type, **kwargs)
+            data = data.replace("+", "%20")
         except Exception as e:
             raise CallException('Failed to prepare request.\n'
                                 'Error: %s\n'
@@ -366,8 +366,8 @@ n
             tags = metric.get('tags')
             # Cook string like "{ 'key1' 'value' 'key2' 'value2' ...}"
             w_s = '{{ {} }}'.format(' '.join("'%s' '%s'" %
-                                    (t_k, t_v) for t_k, t_v in
-                six.iteritems(tags) if t_v))
+                                             (t_k, t_v) for t_k, t_v in
+                                             six.iteritems(tags) if t_v))
         return w_s
 
     def _gen_fetch_script(self, metric):
